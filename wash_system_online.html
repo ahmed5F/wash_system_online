@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام مغاسل الناصرية - أونلاين</title>
+    
+    <!-- التصميم والأيقونات -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- مكتبات Firebase (أساسية للربط) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+    <!-- مكتبات الوظائف (QR, Alerts, Charts) -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        :root { --primary: #0d6efd; --dark: #212529; --gold: #ffc107; --bg: #f3f4f6; }
+        body { font-family: 'Tajawal', sans-serif; background-color: var(--bg); }
+        
+        .sidebar { min-height: 100vh; background: linear-gradient(180deg, #212529 0%, #343a40 100%); color: white; }
+        .nav-link { color: #adb5bd; margin: 5px 15px; border-radius: 8px; transition: 0.3s; cursor: pointer; }
+        .nav-link:hover, .nav-link.active { background: rgba(255,255,255,0.1); color: white; transform: translateX(-5px); }
+        
+        .card-custom { border: none; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); background: white; transition: 0.3s; }
+        .card-custom:hover { transform: translateY(-5px); }
+        
+        /* تصميم البطاقة */
+        .id-card-preview {
+            width: 320px; height: 190px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px; color: white; position: relative; overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2); margin: 0 auto;
+        }
+        
+        #reader { border-radius: 15px; overflow: hidden; border: 4px solid #343a40; }
+        .loader { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.9); z-index:9999; display:flex; align-items:center; justify-content:center; }
+    </style>
+</head>
+<body>
+
+<!-- شاشة التحميل -->
+<div id="loader" class="loader d-none">
+    <div class="spinner-border text-primary" role="status"></div>
+    <span class="ms-2 fw-bold">جاري الاتصال بالسيرفر...</span>
+</div>
+
+<!-- شاشة الدخول -->
+<div id="loginModal" class="modal fade show" style="display: block; background: #212529;" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg p-4 text-center">
+            <img src="https://cdn-icons-png.flaticon.com/512/2965/2965879.png" width="70" class="mb-3 mx-auto">
+            <h3 class="fw-bold">مغاسل الناصرية الحديثة</h3>
+            <p class="text-muted mb-4">نظام الإدارة السحابي (Cloud)</p>
+            <div class="d-grid gap-2">
+                <button onclick="login('worker')" class="btn btn-primary btn-lg"><i class="bi bi-qr-code"></i> دخول الكادر (عامل)</button>
+                <button onclick="login('admin')" class="btn btn-outline-dark"><i class="bi bi-shield-lock"></i> دخول الإدارة</button>
+                <button onclick="login('manager')" class="btn btn-outline-danger"><i class="bi bi-graph-up"></i> المدير العام</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- التطبيق الرئيسي -->
+<div class="container-fluid d-none" id="mainApp">
+    <div class="row">
+        <!-- القائمة الجانبية -->
+        <div class="col-md-2 sidebar d-none d-md-block pt-4">
+            <h5 class="text-center fw-bold mb-5 text-warning"><i class="bi bi-cloud-check"></i> Connected</h5>
+            <div class="nav flex-column" id="sidebarMenu"></div>
+            <div class="mt-auto text-center p-3 text-white-50 small" style="position: absolute; bottom: 0; width: 100%;">
+                نسخة أونلاين 1.0 <br> Nasiriyah App
+            </div>
+        </div>
+
+        <!-- المحتوى -->
+        <div class="col-md-10 p-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="fw-bold" id="pageTitle">لوحة التحكم</h4>
+                <button onclick="location.reload()" class="btn btn-danger btn-sm">خروج</button>
+            </div>
+
+            <!-- 1. قسم العامل -->
+            <div id="workerSection" class="section-content d-none">
+                <div class="row justify-content-center">
+                    <div class="col-md-6">
+                        <div class="card-custom p-4 text-center">
+                            <h4 class="mb-3">ماسح الباركود</h4>
+                            <div id="reader"></div>
+                            <div class="mt-3 input-group">
+                                <input type="text" id="manualPlate" class="form-control" placeholder="أو اكتب رقم اللوحة هنا">
+                                <button class="btn btn-primary" onclick="processWash(document.getElementById('manualPlate').value)">فحص يدوي</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. قسم الإدارة (إضافة مشترك) -->
+            <div id="adminSection" class="section-content d-none">
+                <div class="row">
+                    <div class="col-md-7">
+                        <div class="card-custom p-4">
+                            <h5 class="fw-bold mb-4">تسجيل مشترك جديد (يُحفظ أونلاين)</h5>
+                            <form id="addForm">
+                                <div class="row g-3">
+                                    <div class="col-md-6"><label>الاسم الكامل</label><input type="text" id="regName" class="form-control" required></div>
+                                    <div class="col-md-6"><label>رقم الهاتف</label><input type="tel" id="regPhone" class="form-control" required></div>
+                                    <div class="col-md-6"><label>رقم اللوحة (ID)</label><input type="text" id="regPlate" class="form-control" placeholder="مثال: A1234" required></div>
+                                    <div class="col-md-6"><label>نوع السيارة</label><input type="text" id="regModel" class="form-control" required></div>
+                                    <div class="col-12"><label>الباقة</label>
+                                        <select id="regPlan" class="form-select">
+                                            <option value="4">باقة اقتصادية (4 غسلات) - 25,000</option>
+                                            <option value="8">باقة رجال أعمال (8 غسلات) - 40,000</option>
+                                            <option value="30">باقة مفتوحة (30 غسلة) - 90,000</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12"><button type="submit" class="btn btn-success w-100 mt-3">حفظ في السيرفر</button></div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="card-custom p-4 text-center">
+                            <h5>معاينة البطاقة</h5>
+                            <div id="cardPreview" class="id-card-preview p-3 text-start d-flex flex-column justify-content-between mt-3">
+                                <div>
+                                    <h6 class="text-warning mb-0">Nasiriyah Wash</h6>
+                                    <h4 class="fw-bold mb-0" id="cName">الاسم هنا</h4>
+                                    <small id="cModel">موديل السيارة</small>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-end">
+                                    <h3 class="fw-bold font-monospace mb-0" id="cPlate">XXXXX</h3>
+                                    <div id="cQR" class="bg-white p-1 rounded"></div>
+                                </div>
+                            </div>
+                            <button onclick="downloadCard()" class="btn btn-outline-primary w-100 mt-3">تحميل البطاقة كصورة</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. قسم المدير (إحصائيات حية) -->
+            <div id="managerSection" class="section-content d-none">
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4"><div class="card-custom p-3 border-start border-primary border-5"><h6>عدد المشتركين الكلي</h6><h2 id="totalUsers">0</h2></div></div>
+                    <div class="col-md-4"><div class="card-custom p-3 border-start border-success border-5"><h6>إجمالي الإيرادات</h6><h2 id="totalRevenue">0 د.ع</h2></div></div>
+                    <div class="col-md-4"><div class="card-custom p-3 border-start border-warning border-5"><h6>غسلات اليوم</h6><h2 id="todayWashes">0</h2></div></div>
+                </div>
+                <div class="card-custom p-4">
+                    <h5>سجل العمليات الأخير (Live)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead><tr><th>اللوحة</th><th>الوقت</th><th>المحطة</th></tr></thead>
+                            <tbody id="logsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 1. ربط Firebase (بياناتك الخاصة) ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyAsbL1f_RbnCe_Bh6fp_vSjgv7YSJOT86w",
+        authDomain: "nasiriyahapp-c29b4.firebaseapp.com",
+        projectId: "nasiriyahapp-c29b4",
+        storageBucket: "nasiriyahapp-c29b4.firebasestorage.app",
+        messagingSenderId: "739532585422",
+        appId: "1:739532585422:web:327887f893d15bbcf5539f",
+        measurementId: "G-GH3D5Y59BM"
+    };
+
+    // تهيئة الاتصال
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let currentUserRole = null;
+
+    // --- 2. نظام الدخول ---
+    function login(role) {
+        let pass = "";
+        if(role === 'admin') pass = prompt("رمز الإدارة (555)");
+        if(role === 'manager') pass = prompt("رمز المدير (999)");
+        
+        if((role === 'worker') || (role === 'admin' && pass === '555') || (role === 'manager' && pass === '999')) {
+            currentUserRole = role;
+            document.getElementById('loginModal').style.display = 'none';
+            document.getElementById('mainApp').classList.remove('d-none');
+            setupSidebar();
+            
+            if(role === 'worker') showSection('worker');
+            else if(role === 'admin') showSection('admin');
+            else showSection('manager');
+        } else {
+            Swal.fire('خطأ', 'رمز الدخول غير صحيح', 'error');
+        }
+    }
+
+    function setupSidebar() {
+        const menu = document.getElementById('sidebarMenu');
+        menu.innerHTML = '';
+        if(currentUserRole === 'worker' || currentUserRole === 'manager') menu.innerHTML += `<a class="nav-link" onclick="showSection('worker')"><i class="bi bi-qr-code"></i> الغسيل</a>`;
+        if(currentUserRole === 'admin' || currentUserRole === 'manager') menu.innerHTML += `<a class="nav-link" onclick="showSection('admin')"><i class="bi bi-person-plus"></i> إضافة مشترك</a>`;
+        if(currentUserRole === 'manager') menu.innerHTML += `<a class="nav-link" onclick="showSection('manager')"><i class="bi bi-bar-chart"></i> التقارير</a>`;
+    }
+
+    function showSection(section) {
+        document.querySelectorAll('.section-content').forEach(d => d.classList.add('d-none'));
+        document.getElementById(section + 'Section').classList.remove('d-none');
+        
+        if(section === 'worker') initScanner();
+        if(section === 'manager') loadDashboardData();
+    }
+
+    // --- 3. عمليات قاعدة البيانات (أونلاين) ---
+
+    // إضافة مشترك جديد
+    document.getElementById('addForm').onsubmit = async function(e) {
+        e.preventDefault();
+        loading(true);
+        
+        const plate = document.getElementById('regPlate').value.trim();
+        const planVal = parseInt(document.getElementById('regPlan').value);
+        
+        const data = {
+            name: document.getElementById('regName').value,
+            phone: document.getElementById('regPhone').value,
+            plate: plate,
+            model: document.getElementById('regModel').value,
+            balance: planVal,
+            planOriginal: planVal,
+            regDate: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        try {
+            // التحقق من التكرار
+            const docRef = db.collection('customers').doc(plate);
+            const doc = await docRef.get();
+            
+            if(doc.exists) {
+                loading(false);
+                Swal.fire('خطأ', 'رقم اللوحة مسجل مسبقاً!', 'error');
+                return;
+            }
+
+            // الحفظ في السيرفر
+            await docRef.set(data);
+            
+            loading(false);
+            Swal.fire('تم بنجاح', 'تم رفع بيانات المشترك للسيرفر', 'success');
+            generateCardPreview(data);
+            
+        } catch (error) {
+            loading(false);
+            console.error(error);
+            Swal.fire('خطأ', 'تأكد من الانترنت أو إعدادات فايربيس', 'error');
+        }
+    };
+
+    // عملية الغسل (الخصم)
+    async function processWash(plate) {
+        if(!plate) return;
+        loading(true);
+        
+        try {
+            const userRef = db.collection('customers').doc(plate);
+            const userDoc = await userRef.get();
+
+            if(!userDoc.exists) {
+                loading(false);
+                Swal.fire('غير موجود', 'هذه السيارة غير مسجلة بالنظام', 'error');
+                return;
+            }
+
+            const userData = userDoc.data();
+            if(userData.balance > 0) {
+                // خصم الرصيد
+                await userRef.update({
+                    balance: firebase.firestore.FieldValue.increment(-1)
+                });
+                
+                // تسجيل العملية بالسجل
+                await db.collection('wash_logs').add({
+                    plate: plate,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    station: 'الرئيسي' // يمكن تغييرها حسب الفرع
+                });
+
+                loading(false);
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم الخصم بنجاح',
+                    text: `السيارة: ${userData.model} - المتبقي: ${userData.balance - 1}`,
+                    timer: 3000
+                });
+            } else {
+                loading(false);
+                Swal.fire('تنبيه', 'رصيد المشترك منتهي!', 'warning');
+            }
+
+        } catch (error) {
+            loading(false);
+            Swal.fire('خطأ', 'حدث خطأ في الاتصال', 'error');
+        }
+    }
+
+    // جلب الإحصائيات (للمدير)
+    function loadDashboardData() {
+        // استماع فوري للتغييرات (Real-time)
+        db.collection('customers').onSnapshot(snapshot => {
+            document.getElementById('totalUsers').innerText = snapshot.size;
+            let revenue = 0;
+            snapshot.docs.forEach(doc => {
+                // حساب تقريبي للسعر بناء على الباقة
+                const p = doc.data().planOriginal;
+                if(p == 4) revenue += 25000;
+                else if(p == 8) revenue += 40000;
+                else if(p == 30) revenue += 90000;
+            });
+            document.getElementById('totalRevenue').innerText = revenue.toLocaleString() + " د.ع";
+        });
+
+        // جلب آخر السجلات
+        db.collection('wash_logs').orderBy('timestamp', 'desc').limit(10).onSnapshot(snapshot => {
+            document.getElementById('todayWashes').innerText = snapshot.size; // هذا يعرض عدد آخر 10 فقط للتوضيح
+            
+            const tbody = document.getElementById('logsTable');
+            tbody.innerHTML = '';
+            snapshot.docs.forEach(doc => {
+                const log = doc.data();
+                const date = log.timestamp ? log.timestamp.toDate().toLocaleTimeString('ar-IQ') : 'الآن';
+                tbody.innerHTML += `<tr><td>${log.plate}</td><td>${date}</td><td>${log.station}</td></tr>`;
+            });
+        });
+    }
+
+    // --- 4. أدوات مساعدة ---
+    
+    // ماسح الباركود
+    function initScanner() {
+        const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+        scanner.render((decodedText) => {
+            scanner.clear();
+            processWash(decodedText);
+            // إعادة تشغيل الماسح بعد 5 ثواني
+            setTimeout(() => initScanner(), 5000);
+        });
+    }
+
+    // توليد البطاقة
+    function generateCardPreview(data) {
+        document.getElementById('cName').innerText = data.name;
+        document.getElementById('cModel').innerText = data.model;
+        document.getElementById('cPlate').innerText = data.plate;
+        document.getElementById('cQR').innerHTML = "";
+        new QRCode(document.getElementById("cQR"), { text: data.plate, width: 60, height: 60 });
+    }
+
+    function downloadCard() {
+        html2canvas(document.getElementById('cardPreview')).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `WashCard-${document.getElementById('cPlate').innerText}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+    }
+
+    function loading(show) {
+        document.getElementById('loader').classList.toggle('d-none', !show);
+    }
+
+</script>
+</body>
+</html>
+
